@@ -1,14 +1,20 @@
 name: L2P
 channels:
-  - pytorch
-  - nvidia
   - conda-forge
   - defaults
 dependencies:
-  - python=3.13.18
-  - pytorch=2.11.0
+  - python=3.13
   - numpy=2.4.6
   - pip
   - pip:
-      - timm==1.0.30
+      - --extra-index-url https://download.pytorch.org/whl/cu124
+      - torch==2.11.0
+      - torchvision
+      - numpy==2.4.6
+      - timm==0.6.13
       - avalanche-lib==0.6.0
+
+
+
+
+

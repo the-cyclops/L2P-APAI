@@ -1,6 +1,6 @@
 # USIAMO AVALANCHE
 BATCH_SIZE = 64
-VIT_NAME = "vit_base_patch16_224.augreg_in21k"
+VIT_NAME = "vit_base_patch16_224" #"vit_base_patch16_224.augreg_in21k"
 RESNET_NAME = ""
 SEED = 42
 SEEDS = [42, 43, 44]
