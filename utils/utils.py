@@ -2,7 +2,7 @@ local_results_dir = "/content/results-avalanche"
 dest_dir = os.path.join(project_path, "results-avalanche")
 os.makedirs(local_results_dir, exist_ok=True)
 os.makedirs(dest_dir, exist_ok=True)
-data_path = "/content/data"
+data_path = "/content"
 
 def set_seed(seed):
     random.seed(seed)
@@ -18,14 +18,16 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # --- BENCHMARK SPLIT CIFAR-100 (224x224) ---
 train_transform = transforms.Compose([
-    transforms.Resize((224, 224)),
+    transforms.Resize((224, 224), interpolation=InterpolationMode.BICUBIC),
     transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
+    transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
 ])
 
 eval_transform = transforms.Compose([
-    transforms.Resize((224, 224)),
+    transforms.Resize((224, 224), interpolation=InterpolationMode.BICUBIC),
     transforms.ToTensor(),
+    transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
 ])
 
 benchmark = SplitCIFAR100(
