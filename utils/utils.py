@@ -73,3 +73,103 @@ def run_experiment(strategy, method_name, log_file):
     shutil.copytree(local_results_dir, dest_dir, dirs_exist_ok=True)
     print(f"Results of {method_name} saved to {dest_dir}")
     return results
+
+def show_results(name):
+  import os
+  import numpy as np
+  import pandas as pd
+  import matplotlib.pyplot as plt
+  import seaborn as sns
+
+  # ==========================================
+  # 1. SETUP & DATA LOADING
+  # ==========================================
+  # Define the path to your saved results on Google Drive
+  # project_path = '/content/drive/MyDrive/Colab Notebooks/APAI-project'
+  base_path = project_path + '/results-avalanche/'+name
+  matrix_file = os.path.join(base_path, 'accuracy_matrix.csv')
+
+  if not os.path.exists(matrix_file):
+      print(f"Cannot find the accuracy matrix at: {matrix_file}")
+      print("Creating the matrix...")
+      df_raw = pd.read_csv(os.path.join(base_path, 'eval_results.csv'))
+
+      df_pivot = df_raw.pivot(index='training_exp', columns='eval_exp', values='eval_accuracy') * 100
+
+      df_pivot.to_csv(f'{base_path}/accuracy_matrix.csv')
+
+      acc_matrix = df_pivot.to_numpy()
+  else:
+      acc_matrix = pd.read_csv(matrix_file, index_col=0).to_numpy()
+
+  # Load the matrix
+  # Rows = Model trained up to Task i
+  # Columns = Evaluated on Task j
+  
+  num_tasks = acc_matrix.shape[0]
+
+  # ==========================================
+  # 2. METRICS CALCULATION
+  # ==========================================
+  # A. Final Average Accuracy
+  # (Average performance across all tasks after training on the very last task)
+  final_avg_accuracy = np.mean(acc_matrix[-1, :])
+
+  # B. Forgetting
+  # Forgetting for Task j = (Max accuracy achieved on Task j in the past) - (Final accuracy on Task j)
+  forgetting_per_task = []
+  for j in range(num_tasks - 1): # The last task cannot be forgotten yet
+      # Find the max accuracy for task j from the moment it was trained until the second-to-last step
+      max_past_acc = np.max(acc_matrix[j:-1, j])
+      final_acc = acc_matrix[-1, j]
+      forgetting = max_past_acc - final_acc
+      forgetting_per_task.append(forgetting)
+
+  avg_forgetting = np.mean(forgetting_per_task)
+
+  print(f"--- CONTINUAL LEARNING METRICS ---")
+  print(f"Final Average Accuracy: {final_avg_accuracy:.2f}%")
+  print(f"Average Forgetting:     {avg_forgetting:.2f}%\n")
+
+  # ==========================================
+  # 3. VISUALIZATIONS
+  # ==========================================
+  sns.set_theme(style="white")
+  fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+  # --- Plot 1: Accuracy Matrix Heatmap ---
+  # We use a mask to hide the upper triangle (tasks not yet seen)
+  mask = np.triu(np.ones_like(acc_matrix, dtype=bool), k=1)
+
+  sns.heatmap(acc_matrix, mask=mask, annot=True, fmt=".1f", cmap="Blues",
+              vmin=0, vmax=100, cbar_kws={'label': 'Accuracy (%)'}, ax=axes[0])
+
+  axes[0].set_title("Continual Learning Accuracy Evolution", fontsize=14, fontweight='bold')
+  axes[0].set_xlabel("Evaluated on Task", fontsize=12)
+  axes[0].set_ylabel("Trained up to Task", fontsize=12)
+  axes[0].set_xticks(np.arange(num_tasks) + 0.5, [f"T{i+1}" for i in range(num_tasks)])
+  axes[0].set_yticks(np.arange(num_tasks) + 0.5, [f"T{i+1}" for i in range(num_tasks)], rotation=0)
+
+  # --- Plot 2: Forgetting per Task (Bar Chart) ---
+  tasks = [f"Task {i+1}" for i in range(num_tasks - 1)]
+
+  # Color code: red for high forgetting (>10%), green for low forgetting
+  colors = ['#e74c3c' if f > 10 else '#2ecc71' for f in forgetting_per_task]
+
+  axes[1].bar(tasks, forgetting_per_task, color=colors, edgecolor='black')
+  axes[1].axhline(avg_forgetting, color='red', linestyle='--', linewidth=2, label=f'Avg Forgetting: {avg_forgetting:.2f}%')
+
+  axes[1].set_title("Catastrophic Forgetting per Task", fontsize=14, fontweight='bold')
+  axes[1].set_ylabel("Accuracy Drop (%)", fontsize=12)
+  axes[1].legend()
+  axes[1].grid(axis='y', linestyle='--', alpha=0.7)
+  plt.xticks(rotation=45)
+
+  plt.tight_layout()
+
+  # Save the plot to Drive before showing
+  plot_path = os.path.join(base_path, 'metrics_visualization.png')
+  plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+  print(f"Visualization saved to: {plot_path}")
+
+  plt.show()
