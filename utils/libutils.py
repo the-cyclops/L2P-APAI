@@ -111,29 +111,31 @@ def get_evaluator(run_name, local_results_dir="/content/results-avalanche", para
     )
     return evaluator, log_file
 
-
 def run_experiment(
     strategy,
     benchmark,
     run_name,
     log_file,
     project_path,
-    local_results_dir="/content/results-avalanche",
-    num_workers=4,
+    local_results_dir,
+    max_tasks=None,
 ):
-    """Run the Continual Learning training/evaluation loop and save results to project_path."""
     results = []
     start_time = time.time()
-    n_tasks = len(benchmark.train_stream)
+    n_tasks = max_tasks if max_tasks is not None else len(benchmark.train_stream)
 
-    for i, experience in enumerate(benchmark.train_stream, 1):
+    # cut stream on first n_tasks
+    train_stream = itertools.islice(benchmark.train_stream, n_tasks)
+    test_stream = list(itertools.islice(benchmark.test_stream, n_tasks))
+
+    for i, experience in enumerate(train_stream, 1):
         print(f"\n=== [{run_name}] Task {i}/{n_tasks} (elapsed: {(time.time() - start_time) / 60:.1f} min) ===")
-        strategy.train(experience, num_workers=num_workers)
-        res = strategy.eval(benchmark.test_stream, num_workers=num_workers)
+        strategy.train(experience, num_workers=4)
+        res = strategy.eval(test_stream, num_workers=4)
         results.append(res)
 
-    total_minutes = (time.time() - start_time) / 60
-    print(f"\n=== [{run_name}] COMPLETED in {total_minutes:.2f} min ===")
+    total_minutes = round((time.time() - start_time) / 60, 2)
+    print(f"\n=== [{run_name}] COMPLETED in {total_minutes} min ===")
     output_data = {
         "total_time_minutes": total_minutes,
         "task_evaluations": results,
