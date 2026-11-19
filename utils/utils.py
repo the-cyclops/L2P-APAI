@@ -79,6 +79,12 @@ def run_experiment(strategy, run_name, log_file):
         strategy.train(experience, num_workers=4)
         res = strategy.eval(benchmark.test_stream, num_workers=4)
         results.append(res)
+    total_minutes = (time.time() - start_time) / 60
+    print(f"\n=== [{run_name}] COMPLETATO in {total_minutes:.2f} min ===")
+    output_data = {
+        "total_time_minutes": total_minutes,
+        "task_evaluations": results
+    }
 
     log_file.flush()
     log_file.close()
@@ -88,7 +94,7 @@ def run_experiment(strategy, run_name, log_file):
 
     json_path = os.path.join(run_local_dir, "final_metrics.json")
     with open(json_path, "w") as f:
-        json.dump(results, f, indent=4, default=str)
+        json.dump(output_data, f, indent=4, default=str)
 
     shutil.copytree(run_local_dir, run_dest_dir, dirs_exist_ok=True)
     print(f"Results of {run_name} saved to {run_dest_dir}")
