@@ -44,7 +44,7 @@ def build_run_name(method_name, params, seed=SEED, n_tasks=CIFAR_NUM_TASKS):
     params_str = "_".join(f"{k}{v}" for k, v in params.items())
     return f"{method_name}_{params_str}_t{n_tasks}_s{seed}"
 
-def get_evaluator(run_name, params=None):
+def get_evaluator(run_name, params=None, n_tasks=CIFAR_NUM_TASKS):
     run_dir = os.path.join(local_results_dir, run_name)
     os.makedirs(run_dir, exist_ok=True)
 
@@ -53,7 +53,7 @@ def get_evaluator(run_name, params=None):
         "backbone": VIT_NAME,
         "batch_size": BATCH_SIZE,
         "epochs": EPOCHS,
-        "num_tasks": CIFAR_NUM_TASKS,
+        "num_tasks": n_tasks,
         "seed": SEED,
         "hyperparameters": params or {}
     }
@@ -71,16 +71,22 @@ def get_evaluator(run_name, params=None):
     )
     return evaluator, log_file
 
-def run_experiment(strategy, run_name, log_file):
+def run_experiment(strategy, run_name, log_file, max_tasks=None):
     results = []
     start_time = time.time()
-    for i, experience in enumerate(benchmark.train_stream, 1):
-        print(f"\n=== [{run_name}] Task {i}/{CIFAR_NUM_TASKS} (trascorso: {(time.time()-start_time)/60:.1f} min) ===")
+    n_tasks = max_tasks if max_tasks is not None else CIFAR_NUM_TASKS
+
+    train_stream = itertools.islice(benchmark.train_stream, n_tasks)
+    test_stream = list(itertools.islice(benchmark.test_stream, n_tasks))
+
+    for i, experience in enumerate(train_stream, 1):
+        print(f"\n=== [{run_name}] Task {i}/{n_tasks} (trascorso: {(time.time()-start_time)/60:.1f} min) ===")
         strategy.train(experience, num_workers=4)
-        res = strategy.eval(benchmark.test_stream, num_workers=4)
+        res = strategy.eval(test_stream, num_workers=4)
         results.append(res)
-    total_minutes = (time.time() - start_time) / 60
-    print(f"\n=== [{run_name}] COMPLETATO in {total_minutes:.2f} min ===")
+
+    total_minutes = round((time.time() - start_time) / 60, 2)
+    print(f"\n=== [{run_name}] COMPLETATO in {total_minutes} min ===")
     output_data = {
         "total_time_minutes": total_minutes,
         "task_evaluations": results
@@ -99,6 +105,33 @@ def run_experiment(strategy, run_name, log_file):
     shutil.copytree(run_local_dir, run_dest_dir, dirs_exist_ok=True)
     print(f"Results of {run_name} saved to {run_dest_dir}")
     return results
+
+def run_grid_search(method_name, param_grid, build_strategy_fn, max_tasks=GRID_TASKS, show_plots=False):
+    keys, values = zip(*param_grid.items())
+    combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
+    total_runs = len(combinations)
+
+    for idx, params in enumerate(combinations, 1):
+        base_name = build_run_name(method_name, params, seed=SEED, n_tasks=max_tasks)
+        run_path = os.path.join(f"grid-{method_name}", base_name)
+        print(f"\n>>> [{method_name.upper()}] Run {idx}/{total_runs}: {run_path}")
+
+        if os.path.exists(os.path.join(dest_dir, run_path, "final_metrics.json")):
+            print("[SKIP] Già completata su Drive.")
+            continue
+
+        set_seed(SEED)
+        evaluator, log_file = get_evaluator(run_path, params, n_tasks=max_tasks)
+        strategy, extra_objs = build_strategy_fn(params, evaluator)
+
+        run_experiment(strategy, run_path, log_file, max_tasks=max_tasks)
+        if show_plots:
+            show_results(run_path)
+
+        extra_objs.clear()
+        del strategy, extra_objs, evaluator
+        gc.collect()
+        torch.cuda.empty_cache()
 
 def show_results(name):
   import os
