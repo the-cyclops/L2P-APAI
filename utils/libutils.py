@@ -22,7 +22,7 @@ from avalanche.evaluation.metrics import (
 from avalanche.logging import InteractiveLogger, TextLogger, CSVLogger
 
 # Import constants from config.py (SEED, CIFAR_NUM_TASKS, VIT_NAME, BATCH_SIZE, EPOCHS)
-from config import *
+from config_cifar100 import *
 
 
 def setup_environment(project_path, seed=SEED, local_dir="/content/results-avalanche", data_path="/content"):
