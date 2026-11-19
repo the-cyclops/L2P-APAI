@@ -10,6 +10,8 @@ import seaborn as sns
 import torch
 from torchvision import transforms
 from torchvision.transforms import InterpolationMode
+import gc
+import itertools
 
 from avalanche.benchmarks.classic import SplitCIFAR100
 from avalanche.training.plugins import EvaluationPlugin
@@ -257,3 +259,70 @@ def show_results(name, project_path):
     plt.savefig(plot_path, dpi=300, bbox_inches="tight")
     print(f"Visualization saved to: {plot_path}")
     plt.show()
+
+
+def run_grid_search(
+    method_name,
+    param_grid,
+    build_strategy_fn,
+    benchmark,
+    project_path,
+    local_results_dir,
+    max_tasks,
+    seed,
+    show_plots = True
+):
+    """Run an exhaustive grid search over param_grid, skipping completed runs and cleaning GPU VRAM between runs."""
+    dest_dir = os.path.join(project_path, "results-avalanche")
+    keys, values = zip(*param_grid.items())
+    combinations = [dict(zip(keys, v)) for v in itertools.product(*values)]
+    total_runs = len(combinations)
+
+    for idx, params in enumerate(combinations, 1):
+        base_name = build_run_name(method_name, params, seed, max_tasks)
+        run_path = os.path.join(f"grid-{method_name}", base_name)
+        print(f"\n>>> [{method_name.upper()}] Run {idx}/{total_runs}: {run_path}")
+
+        if os.path.exists(os.path.join(dest_dir, run_path, "final_metrics.json")):
+            print("[SKIP] Already completed on Drive.")
+            continue
+
+        strategy = None
+        evaluator = None
+        extra_objs = None
+        log_file = None
+
+        try:
+            setup_environment(project_path, seed, local_results_dir)
+            evaluator, log_file = get_evaluator(
+                run_path, local_results_dir, params, max_tasks
+            )
+            strategy, extra_objs = build_strategy_fn(params, evaluator)
+
+            run_experiment(
+                strategy,
+                benchmark,
+                run_path,
+                log_file,
+                project_path,
+                local_results_dir,
+                max_tasks,
+            )
+            if show_plots:
+                show_results(run_path, project_path)
+
+        finally:
+            if log_file and not log_file.closed:
+                log_file.flush()
+                log_file.close()
+
+            if isinstance(extra_objs, (list, dict, set)):
+                extra_objs.clear()
+            if evaluator is not None and hasattr(evaluator, "loggers"):
+                evaluator.loggers.clear()
+
+            del strategy, extra_objs, evaluator
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
