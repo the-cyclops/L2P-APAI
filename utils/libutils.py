@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import re
 import torch
 from torchvision import transforms
 from torchvision.transforms import InterpolationMode
@@ -192,16 +193,25 @@ def show_results(name, project_path):
     print(f"Final Average Accuracy: {final_avg_accuracy:.2f}%")
     print(f"Average Forgetting:     {avg_forgetting:.2f}%\n")
 
+    base, t_part, s_part = name.rsplit('_', 2)
+    parts = [p for p in base.split('_') if p]  # gestisce anche il caso di params vuoto
+    
+    method = parts[0].upper()
+    raw_params = parts[1:]
+    formatted_params = [
+      re.sub(r'^([a-zA-Z]+)([-+]?\d*\.?\d+.*)$', r'\1=\2', p)
+      for p in raw_params
+    ]
+    params_display = ", ".join(formatted_params) if formatted_params else "no params"
+
     sns.set_theme(style="white")
     fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
     fig.suptitle(
-        f"{name}  |  Final Avg Accuracy: {final_avg_accuracy:.2f}%  |  Avg Forgetting: {avg_forgetting:.2f}%",
-        fontsize=15,
-        fontweight="bold",
-        y=1.02,
+      f"{method} ({params_display})  |  Tasks: {t_part[1:]}  |  Seed: {s_part[1:]}\n",
+      fontsize=14, fontweight='bold'
     )
 
-    # Left subplot: Accuracy Heatmap
     mask = np.triu(np.ones_like(acc_matrix, dtype=bool), k=1)
     sns.heatmap(
         acc_matrix,
@@ -215,8 +225,19 @@ def show_results(name, project_path):
         ax=axes[0],
     )
 
+    axes[0].text(
+        0.95, 0.95,
+        f"Final Avg Accuracy:\n{final_avg_accuracy:.2f}%",
+        transform=axes[0].transAxes,
+        fontsize=12,
+        fontweight='bold',
+        verticalalignment='top',
+        horizontalalignment='right',
+        bbox=dict(boxstyle='round,pad=0.5', facecolor='#eaf2f8', edgecolor='#2980b9', linewidth=1.5)
+    )
+
     axes[0].set_title(
-        f"Accuracy Evolution (Final Avg: {final_avg_accuracy:.2f}%)",
+        f"Accuracy Evolution",
         fontsize=13,
         fontweight="bold",
     )
@@ -249,7 +270,7 @@ def show_results(name, project_path):
         )
 
     axes[1].set_title(
-        f"Catastrophic Forgetting per Task (Avg: {avg_forgetting:.2f}%)",
+        f"Catastrophic Forgetting per Task ",
         fontsize=13,
         fontweight="bold",
     )
