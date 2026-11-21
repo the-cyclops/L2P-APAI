@@ -349,3 +349,30 @@ def run_grid_search(
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
                 torch.cuda.empty_cache()
+
+
+class _PyTorchTaskDataset(torch.utils.data.Dataset):
+
+    def __init__(self, avalanche_dataset, include_task_id=False):
+        self.ds = avalanche_dataset # reference to the original Avalanche dataset (avoid memory overhead)
+        self.include_task_id = include_task_id # flag to include task ID in the returned items (avalanche dataset returns (x, y, task_id) by default)
+
+    def __len__(self):
+        return len(self.ds)
+
+    def __getitem__(self, idx):
+        item = self.ds[idx] # ask to avalanche dataset for the item at index idx
+        return (item[0], item[1], item[2]) if self.include_task_id else (item[0], item[1])
+
+
+def get_cifar100_datasets(data_path="/content", n_tasks=10, seed=SEED, include_task_id=False):
+
+    bm = get_cifar100_benchmark(data_path=data_path, n_tasks=n_tasks, seed=seed) # create the avalanche benchmark
+
+    return {
+        "train_datasets": [_PyTorchTaskDataset(exp.dataset, include_task_id) for exp in bm.train_stream],
+        "test_datasets":  [_PyTorchTaskDataset(exp.dataset, include_task_id) for exp in bm.test_stream],
+        "classes_per_exp": [list(exp.classes_in_this_experience) for exp in bm.train_stream],
+        "class_order": list(bm.classes_order),
+        "n_tasks": n_tasks,
+    }
