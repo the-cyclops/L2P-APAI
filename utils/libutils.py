@@ -84,7 +84,7 @@ def build_run_name(method_name, params, seed=SEED, n_tasks=CIFAR_NUM_TASKS):
     return f"{method_name}_{params_str}_t{n_tasks}_s{seed}"
 
 
-def get_evaluator(run_name, local_results_dir="/content/results-avalanche", params=None, n_tasks=CIFAR_NUM_TASKS):
+def get_evaluator(run_name, local_results_dir="/content/results-avalanche", params=None, n_tasks=CIFAR_NUM_TASKS, seed=SEED):
     """Save run configuration to JSON and return an Avalanche EvaluationPlugin and log file."""
     run_dir = os.path.join(local_results_dir, run_name)
     os.makedirs(run_dir, exist_ok=True)
@@ -95,7 +95,7 @@ def get_evaluator(run_name, local_results_dir="/content/results-avalanche", para
         "batch_size": BATCH_SIZE,
         "epochs": EPOCHS,
         "num_tasks": n_tasks,
-        "seed": SEED,
+        "seed": seed,
         "hyperparameters": params or {},
     }
     with open(os.path.join(run_dir, "config.json"), "w") as f:
@@ -349,6 +349,86 @@ def run_grid_search(
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
                 torch.cuda.empty_cache()
+
+def run_multi_seed(
+    method_name,
+    params,
+    seeds,
+    build_strategy_fn,
+    project_path,
+    local_results_dir,
+    max_tasks=CIFAR_NUM_TASKS,
+    data_path="/content",
+    benchmark=None,
+    show_plots=False,
+):
+    """Run an experiment across multiple seeds inside results-avalanche/MULTI-SEEDS-TRAINING-{method_name}."""
+    dest_dir = os.path.join(project_path, "results-avalanche")
+    parent_folder = f"MULTI-SEEDS-TRAINING-{method_name}"
+    total_seeds = len(seeds)
+    all_results = {}
+
+    for idx, seed in enumerate(seeds, 1):
+        base_name = build_run_name(method_name, params, seed=seed, n_tasks=max_tasks)
+        run_path = os.path.join(parent_folder, base_name)
+        print(f"\n>>> [{method_name.upper()}] Seed {idx}/{total_seeds} (seed={seed}): {run_path}")
+
+        if os.path.exists(os.path.join(dest_dir, run_path, "final_metrics.json")):
+            print("[SKIP] Already completed on Drive.")
+            continue
+
+        strategy = None
+        evaluator = None
+        extra_objs = None
+        log_file = None
+        current_benchmark = None
+
+        try:
+            setup_environment(project_path, seed=seed, local_dir=local_results_dir, data_path=data_path)
+
+            current_benchmark = (
+                benchmark
+                if benchmark is not None
+                else get_cifar100_benchmark(data_path=data_path, n_tasks=max_tasks, seed=seed)
+            )
+
+            evaluator, log_file = get_evaluator(
+                run_path, local_results_dir, params, max_tasks
+            )
+            strategy, extra_objs = build_strategy_fn(params, evaluator)
+
+            res = run_experiment(
+                strategy,
+                current_benchmark,
+                run_path,
+                log_file,
+                project_path,
+                local_results_dir,
+                max_tasks,
+            )
+            all_results[seed] = res
+
+            if show_plots:
+                show_results(run_path, project_path)
+
+        finally:
+            if log_file and not log_file.closed:
+                log_file.flush()
+                log_file.close()
+
+            if isinstance(extra_objs, (list, dict, set)):
+                extra_objs.clear()
+            if evaluator is not None and hasattr(evaluator, "loggers"):
+                evaluator.loggers.clear()
+
+            del strategy, extra_objs, evaluator, current_benchmark
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+
+    return all_results
+
 
 
 class _PyTorchTaskDataset(torch.utils.data.Dataset):
