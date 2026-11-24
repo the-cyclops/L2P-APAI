@@ -157,15 +157,33 @@ def run_experiment(
     return results
 
 
-def show_results(name, project_path):
+def get_formatted_method_name(name):
+    base, task, seed = name.rsplit('_', 2)
+    parts = [p for p in base.split('_') if p] 
+    
+    method = parts[0].upper()
+    raw_params = parts[1:]
+    formatted_params = [
+      re.sub(r'^([a-zA-Z]+)([-+]?\d*\.?\d+.*)$', r'\1=\2', p)
+      for p in raw_params
+    ]
+    params_display = ", ".join(formatted_params) if formatted_params else "no params"
+    method_name = f"{method}({params_display})"
+
+    #remove letters
+    task_number = int(task.split('t')[1])
+    seed_number = int(seed.split('s')[1])
+
+    return method_name, task_number, seed_number
+
+def show_results(name, results_dir):
     """Compute final accuracy and forgetting metrics and plot the accuracy heatmap and forgetting bar chart."""
-    base_path = os.path.join(project_path, "results-avalanche", name)
-    matrix_file = os.path.join(base_path, "accuracy_matrix.csv")
+    matrix_file = os.path.join(results_dir, name, "accuracy_matrix.csv")
 
     if not os.path.exists(matrix_file):
         print(f"Cannot find the accuracy matrix at: {matrix_file}")
         print("Creating the matrix...")
-        df_raw = pd.read_csv(os.path.join(base_path, "eval_results.csv"))
+        df_raw = pd.read_csv(os.path.join(results_dir, "eval_results.csv"))
         df_pivot = df_raw.pivot(index="training_exp", columns="eval_exp", values="eval_accuracy") * 100
         df_pivot.to_csv(matrix_file)
         acc_matrix = df_pivot.to_numpy()
@@ -193,22 +211,13 @@ def show_results(name, project_path):
     print(f"Final Average Accuracy: {final_avg_accuracy:.2f}%")
     print(f"Average Forgetting:     {avg_forgetting:.2f}%\n")
 
-    base, t_part, s_part = name.rsplit('_', 2)
-    parts = [p for p in base.split('_') if p]  # gestisce anche il caso di params vuoto
-    
-    method = parts[0].upper()
-    raw_params = parts[1:]
-    formatted_params = [
-      re.sub(r'^([a-zA-Z]+)([-+]?\d*\.?\d+.*)$', r'\1=\2', p)
-      for p in raw_params
-    ]
-    params_display = ", ".join(formatted_params) if formatted_params else "no params"
+    method_name, task_name, seed_name = get_formatted_method_name(name)
 
     sns.set_theme(style="white")
     fig, axes = plt.subplots(1, 2, figsize=(16, 6))
 
     fig.suptitle(
-      f"{method} ({params_display})  |  Tasks: {t_part[1:]}  |  Seed: {s_part[1:]}\n",
+      f" {method_name}  |  Tasks: {task_name}  |  Seed: {seed_name}\n",
       fontsize=14, fontweight='bold'
     )
 
@@ -278,10 +287,107 @@ def show_results(name, project_path):
     axes[1].grid(axis="y", linestyle="--", alpha=0.7)
 
     plt.tight_layout()
-    plot_path = os.path.join(base_path, "metrics_visualization.png")
+    plot_path = os.path.join(results_dir, "metrics_visualization.png")
     plt.savefig(plot_path, dpi=300, bbox_inches="tight")
     print(f"Visualization saved to: {plot_path}")
     plt.show()
+
+def analyze_grid_search(results_dir, name=None, n_tasks=None, seed=None):
+    grid_path = os.path.join(results_dir, f"grid-{name}")
+
+    records = []
+    matrices = {}
+
+    if not os.path.exists(grid_path):
+        raise FileNotFoundError(f"Folder not found: {grid_path}")
+
+    for entry in os.listdir(grid_path):
+        full_path = os.path.join(grid_path, entry)
+        run_name = entry.replace('.npy', '') if entry.endswith('.npy') else entry
+
+        if name and not run_name.startswith(f"{name}_"):
+            print(f"Skipping {run_name} because it doesn't start with {name}_")
+            continue
+        if n_tasks is not None and f"_t{n_tasks}_" not in run_name:
+            print(f"Skipping {run_name} because it doesn't have {n_tasks} tasks")
+            continue
+        if seed is not None and not run_name.endswith(f"_s{seed}"):
+            print(f"Skipping {run_name} because it doesn't have seed {seed}")
+            continue
+
+        if os.path.isdir(full_path):
+            matrix_path = os.path.join(full_path, "accuracy_matrix.csv")
+
+
+        if not os.path.exists(matrix_path):
+                print(f"Cannot find the accuracy matrix at: {matrix_path}")
+                print("Creating the matrix...")
+                df_raw = pd.read_csv(os.path.join(full_path, 'eval_results.csv'))
+                df_pivot = df_raw.pivot(index='training_exp', columns='eval_exp', values='eval_accuracy') * 100
+                df_pivot.to_csv(f'{full_path}/accuracy_matrix.csv')
+                acc_matrix = df_pivot.to_numpy()
+        else:
+                acc_matrix = pd.read_csv(matrix_path, index_col=0).to_numpy()
+
+        if np.max(acc_matrix) <= 1.0:
+            acc_matrix = acc_matrix * 100.0
+
+        num_tasks = acc_matrix.shape[0]
+
+        final_avg_acc = float(np.mean(acc_matrix[-1, :]))
+
+        forgetting_per_task = []
+        for j in range(num_tasks - 1):
+            max_past = np.max(acc_matrix[j:-1, j])
+            final_acc = acc_matrix[-1, j]
+            forgetting_per_task.append(max_past - final_acc)
+
+        avg_forgetting = float(np.mean(forgetting_per_task)) if forgetting_per_task else 0.0
+        t1_forgetting = float(forgetting_per_task[0]) if forgetting_per_task else 0.0
+
+        method_name, task_number, seed_number = get_formatted_method_name(run_name)
+
+        records.append({
+            "run_name": run_name,
+            "formatted_name": f"{method_name} | Tasks: {task_number} | Seed: {seed_number}",
+            "avg_acc": final_avg_acc,
+            "avg_forgetting": avg_forgetting,
+            "t1_forgetting": t1_forgetting
+        })
+        matrices[run_name] = acc_matrix
+
+    if not records:
+        print("No result found.")
+        return None
+
+    df = pd.DataFrame(records)
+
+    top3_acc = df.sort_values(by="avg_acc", ascending=False).head(3)
+    top3_forg = df.sort_values(by="avg_forgetting", ascending=True).head(3)
+
+    print("=" * 75)
+    print("TOP 3 - HIGHEST AVERAGE ACCURACY")
+    print("=" * 75)
+    print(top3_acc[["formatted_name", "avg_acc", "avg_forgetting", "t1_forgetting"]].to_string(index=False))
+
+    print("\n" + "=" * 75)
+    print("TOP 3 - LOWEST AVERAGE FORGETTING")
+    print("=" * 75)
+    print(top3_forg[["formatted_name", "avg_forgetting", "avg_acc", "t1_forgetting"]].to_string(index=False))
+    print("=" * 75 + "\n")
+
+    best_acc_row = top3_acc.iloc[0]
+    best_forg_row = top3_forg.iloc[0]
+
+    if best_acc_row["run_name"] == best_forg_row["run_name"]:
+        print(f"Method {best_acc_row["formatted_name"]} has the best Accouracy and Forgetting: {best_acc_row['run_name']}")
+        show_results(f"{best_acc_row["run_name"]}", results_dir+f"/grid-{name}")
+    else:
+        print(f"Method {best_acc_row['formatted_name']} has the best Accuracy")
+        show_results(f"{best_acc_row["run_name"]}", results_dir+f"/grid-{name}")
+        print("\n\n")
+        print(f"Method {best_forg_row['formatted_name']} has the lowest Forgetting")
+        show_results(f"{best_acc_row["run_name"]}", results_dir+f"/grid-{name}")
 
 
 def run_grid_search(
