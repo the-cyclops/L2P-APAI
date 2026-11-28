@@ -399,7 +399,7 @@ def run_grid_search(
     local_results_dir,
     max_tasks,
     seed,
-    show_plots = True
+    show_plots = False
 ):
     """Run an exhaustive grid search over param_grid, skipping completed runs and cleaning GPU VRAM between runs."""
     dest_dir = os.path.join(project_path, "results-avalanche")
